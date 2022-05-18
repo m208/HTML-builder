@@ -5,17 +5,17 @@ asyncJob();
 
 async function asyncJob(){
   const copy = getPath('files-copy');
-  let dirExist = await isDirExist(copy); 
-  //console.log('dirExist ', dirExist);
-
-  if(dirExist) {
-    await fsp.rmdir(copy, {recursive:true});
-    await fsp.mkdir(copy);
+  const dirExist = await isDirExist(copy); 
+  let errors = false;
+  
+  if(dirExist) { 
+    try { await fsp.rmdir(copy, {recursive:true}); }
+    catch (err) { console.log(err + '\nCan\'t remove dir!');  errors = true;}
   }
-  else await fsp.mkdir(copy); 
+  if(!errors) await fsp.mkdir(copy); 
 
   const files = await getFiles(getPath('files'));
-  if(files){
+  if(files && !errors){
     for (const file of files) {
       await fsp.copyFile(getPath(`files/${file.name}`), getPath(`files-copy/${file.name}`));
     }
