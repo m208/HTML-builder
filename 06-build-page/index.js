@@ -9,12 +9,9 @@ doAsyncJob();
 
 async function doAsyncJob() {
   const dist = 'project-dist';
-  const dirExist = await isDirExist(getPath(dist));
 
-  if (dirExist) {
-    try { await fsp.rmdir(getPath(dist), { recursive: true }); }
-    catch (err) { console.log(err + '\nCan\'t remove dir!'); return null; }
-  }
+  try { await fsp.rm(getPath(dist), { recursive: true, force: true }); }
+  catch (err) { console.log(err + '\nCan\'t remove dir!'); return null; }
 
   await fsp.mkdir(getPath(dist));
   await generateHTML('template.html', dist + '/index.html');
