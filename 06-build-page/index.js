@@ -34,8 +34,10 @@ async function generateHTML(from, to) {
         if (data.includes(tag)) {
           const tagName = tag.replace(/{/g, '').replace(/}/g, '').trim();
           const tagPath = (getPath('components/' + tagName + '.html'));
-          const tagContent = await fsp.readFile(tagPath, 'utf-8');
-          data = data.replace(tag, tagContent);
+          try{
+            const tagContent = await fsp.readFile(tagPath, 'utf-8');
+            data = data.replace(tag, tagContent);
+          } catch(err) { console.log('Template for tag "'+ tagName + '" not found');}
         }
       }
       callback(null, data);
@@ -49,17 +51,32 @@ async function getTemplateTags(from) {
   return new Promise(function (resolve) {
 
     const readFile = fs.createReadStream(getPath(from), 'utf8');
-    const tags = [];
-
+    
     readFile.on('data', (data) => {
-      const mdata = data.split('\n')
-        .filter(el => el.includes('{{') && el.includes('}}'));
-
-      mdata.forEach(el => { tags.push(el.trim()); });
-
+      const tags = tagSearch(data);
       resolve(tags);
     });
   });
+}
+
+function tagSearch(data){
+  const tags = [];
+  let mdata = data;
+  while (mdata.search('{{') >= 0 && mdata.search('}}') >= 0) {
+    const start = mdata.search('{{');
+    if (start >= 0) {
+      const end = mdata.search('}}');
+      if (end > start) {
+        let content = mdata.slice(start, end + 2);
+        //additional trim
+        const reverse = content.split('').reverse().join('');
+        content = content.slice(-(reverse.search('{{') + 2));
+        tags.push(content);
+      }
+      mdata = mdata.substring(end + 2);
+    }
+  }
+  return tags;
 }
 
 async function generateCSS(from, to) {
