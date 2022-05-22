@@ -1,7 +1,7 @@
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
-const { Transform } = require('stream');
+const { Readable } = require('stream');
 
 
 doAsyncJob();
@@ -20,73 +20,48 @@ async function doAsyncJob() {
 }
 
 async function generateHTML(from, to) {
+  const readTemplate = fs.createReadStream(getPath(from), 'utf8');
 
-  const tags = await getTemplateTags(from);
-
-  const readFile = fs.createReadStream(getPath(from), 'utf8');
-  const writeFile = fs.createWriteStream(getPath(to), 'utf8');
-
-  const tagInsert = new Transform({
-    async transform(chunk, encoding, callback) {
-      let data = chunk.toString();
-
-      for (const tag of tags) {
-        if (data.includes(tag)) {
-          const tagName = tag.replace(/{/g, '').replace(/}/g, '').trim();
-          const tagPath = (getPath('components/' + tagName + '.html'));
-          try{
-            const tagContent = await fsp.readFile(tagPath, 'utf-8');
-            data = data.replace(tag, tagContent);
-          } catch(err) { console.log('Template for tag "'+ tagName + '" not found');}
-        }
-      }
-      callback(null, data);
-    },
-  });
-
-  readFile.pipe(tagInsert).pipe(writeFile);
-}
-
-async function getTemplateTags(from) {
-  return new Promise(function (resolve) {
-
-    const readFile = fs.createReadStream(getPath(from), 'utf8');
-    
-    readFile.on('data', (data) => {
-      const tags = tagSearch(data);
-      resolve(tags);
-    });
-  });
-}
-
-function tagSearch(data){
-  const tags = [];
-  let mdata = data;
-  while (mdata.search('{{') >= 0 && mdata.search('}}') >= 0) {
-    const start = mdata.search('{{');
-    if (start >= 0) {
-      const end = mdata.search('}}');
-      if (end > start) {
-        let content = mdata.slice(start, end + 2);
-        //additional trim
-        const reverse = content.split('').reverse().join('');
-        content = content.slice(-(reverse.search('{{') + 2));
-        tags.push(content);
-      }
-      mdata = mdata.substring(end + 2);
+  readTemplate.on('data', async (chunk) => {
+    let mdata = chunk.toString()
+      .replace(/(?<=<!--)[\s\S]*(?=-->)/g, '');  // remove comments <!--  -->
+    const tags = mdata.match(/{{.+?}}/g);        // match {{ c }}
+    //console.log(tags);
+    const items = [];
+    for (const tag of tags) {
+      const pos = mdata.indexOf(tag);
+      items.push(mdata.slice(0, pos));
+      items.push(tag);
+      mdata = mdata.substring(pos + tag.length);
     }
-  }
-  return tags;
+
+    for (const item of items) {
+      const writeTo = fs.createWriteStream(getPath(to), { 'flags': 'a' });
+      const readFrom = (tags.includes(item))
+        ? fs.createReadStream(getPath('components/' + item.slice(2, -2).trim() + '.html'))
+        : Readable.from(item);
+
+      try { await pumpFile(readFrom, writeTo); }
+      catch (err) { console.log('Template for tag ' + item + ' not found!'); }
+    }
+  });
+}
+
+async function pumpFile(readable, writable) {
+
+  return new Promise((resolve, reject) => {
+    readable.pipe(writable);
+    writable.on('finish', () => { resolve(); });
+    readable.on('error', (err) => { reject(err); });
+    writable.on('error', (err) => { reject(err); });
+  });
 }
 
 async function generateCSS(from, to) {
-  const writeTo = fs.createWriteStream(getPath(to), 'utf8');
 
-  const addLines = new Transform({
-    transform(chunk, encoding, callback) {
-      callback(null, chunk.toString() + '\n\n');
-    },
-  });
+  const getWriteStream = (to) => {
+    return fs.createWriteStream(getPath(to), { 'flags': 'a' });
+  };
 
   const files = await getFiles(getPath(from));
   if (files) {
@@ -95,8 +70,10 @@ async function generateCSS(from, to) {
     for (const file of cssFiles) {
       const filePath = path.join(getPath(from), file.name);
       const readFrom = fs.createReadStream(filePath, 'utf8');
-      readFrom.pipe(addLines);
-      readFrom.on('end', () => { addLines.pipe(writeTo); });
+      const newLines = Readable.from('\n\n');
+
+      await pumpFile(readFrom, getWriteStream(to));
+      await pumpFile(newLines, getWriteStream(to));
     }
   }
 }
